@@ -27,6 +27,7 @@ export function readCustomRoots(value?: string) {
 
 export interface CandidateOptions {
   root: string;
+  additionalRoots?: string[];
   type: ResultType;
   includeHidden: boolean;
   includeGlobs?: string;
@@ -66,9 +67,10 @@ export function candidateRules(options: CandidateOptions) {
   };
 }
 
-type Folder = { path: string; relative: string };
+type Folder = { path: string; relative: string; entries?: Dirent[] };
 
-async function readFolder({ path, relative }: Folder): Promise<Dirent[]> {
+async function readFolder({ path, relative, entries }: Folder): Promise<Dirent[]> {
+  if (entries) return entries;
   try {
     return await readdir(path, { withFileTypes: true });
   } catch (error) {
@@ -86,7 +88,20 @@ export async function refreshIndex(file: string, options: CandidateOptions, sign
   try {
     const handle = await open(temporary, "wx", 0o600);
     try {
-      const pending: Folder[] = [{ path: options.root, relative: "" }];
+      const roots = [options.root, ...(options.additionalRoots ?? [])];
+      const pending: Folder[] = [];
+      const failures: unknown[] = [];
+      for (const path of roots) {
+        signal.throwIfAborted();
+        try {
+          const entries = await readdir(path, { withFileTypes: true });
+          pending.push({ path, relative: "", entries });
+        } catch (error) {
+          failures.push(error);
+        }
+      }
+      if (!pending.length) throw failures[0];
+      pending.reverse();
 
       while (pending.length > 0) {
         signal.throwIfAborted();

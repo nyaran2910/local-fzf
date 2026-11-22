@@ -27,6 +27,7 @@
       "data": [
         { "title": "Home", "value": "home" },
         { "title": "First Custom Location", "value": "custom" },
+        { "title": "All Custom Locations", "value": "custom-all" },
         { "title": "Entire Disk", "value": "disk" }
       ]
     },

@@ -1,13 +1,17 @@
-import { Action, ActionPanel, environment, getPreferenceValues, Icon, List, openExtensionPreferences } from "@raycast/api";
+import {
+  Action, ActionPanel, closeMainWindow, environment, getPreferenceValues, Icon, List, LocalStorage, open,
+  openExtensionPreferences, showToast, Toast,
+} from "@raycast/api";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname } from "node:path";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CandidateOptions, candidateRules, indexPath, readCustomRoots, refreshIndex, ResultType, resultTypes } from "./candidates";
 import { findFzf, searchIndex } from "./fzf";
+import { rankMatches, trackOpen, type UsageHistory } from "./usage";
 
 interface Settings {
-  defaultScope: "home" | "custom" | "disk";
+  defaultScope: "home" | "custom" | "custom-all" | "disk";
   customRoots?: string;
   defaultType: ResultType;
   includeGlobs?: string;
@@ -19,7 +23,7 @@ interface Settings {
 }
 
 interface SearchLocation {
-  path: string;
+  id: string;
   title: string;
 }
 
@@ -36,6 +40,24 @@ const typeLabels: Record<ResultType, string> = {
   folders: "Folders",
 };
 const minimumRefreshInterval = 30_000;
+const allCustomLocations = "custom-all";
+const usageStorageKey = "search-usage-v1";
+let pendingUsageWrite: Promise<unknown> = Promise.resolve();
+
+async function loadUsage(): Promise<UsageHistory> {
+  const saved = await LocalStorage.getItem<string>(usageStorageKey);
+  return saved ? JSON.parse(saved) as UsageHistory : [];
+}
+
+function saveOpenedPath(path: string, query: string) {
+  const save = pendingUsageWrite.then(async () => {
+    const usage = trackOpen(await loadUsage(), path, query, Date.now());
+    await LocalStorage.setItem(usageStorageKey, JSON.stringify(usage));
+    return usage;
+  });
+  pendingUsageWrite = save.catch(() => {});
+  return save;
+}
 
 function displayPath(path: string) {
   const home = homedir();
@@ -44,10 +66,14 @@ function displayPath(path: string) {
 
 function locations(custom: string[]): SearchLocation[] {
   const home = homedir();
+  const customLocations = custom
+    .filter((path) => path !== home && path !== "/")
+    .map((path) => ({ id: path, title: displayPath(path) }));
+  if (custom.length > 1) customLocations.unshift({ id: allCustomLocations, title: "All Custom Locations" });
   return [
-    { path: home, title: "Home" },
-    ...custom.filter((path) => path !== home && path !== "/").map((path) => ({ path, title: displayPath(path) })),
-    { path: "/", title: "Entire Disk" },
+    { id: home, title: "Home" },
+    ...customLocations,
+    { id: "/", title: "Entire Disk" },
   ];
 }
 
@@ -77,29 +103,38 @@ export default function Command() {
 
 function Search({ settings, customRoots }: { settings: Settings; customRoots: string[] }) {
   const roots = locations(customRoots);
-  const [root, setRoot] = useState(() => {
+  const [scope, setScope] = useState(() => {
     if (settings.defaultScope === "disk") return "/";
-    if (settings.defaultScope === "custom") return customRoots[0] ?? homedir();
+    if (settings.defaultScope === "custom-all" && customRoots.length > 1) return allCustomLocations;
+    if (settings.defaultScope === "custom" || settings.defaultScope === "custom-all") return customRoots[0] ?? homedir();
     return homedir();
   });
   const [type, setType] = useState<ResultType>(settings.defaultType ?? "both");
   const [query, setQuery] = useState("");
   const [binary, setBinary] = useState<{ path?: string; error?: string }>({});
   const [index, setIndex] = useState<IndexState>();
-  const [result, setResult] = useState<{ file: string; paths: string[]; error?: string }>();
+  const [result, setResult] = useState<{ file: string; query: string; paths: string[]; error?: string }>();
+  const [usage, setUsage] = useState<UsageHistory>([]);
   const [searching, setSearching] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const consumedRefresh = useRef(0);
 
   const options = useMemo<CandidateOptions>(() => ({
-    root,
+    root: scope === allCustomLocations ? customRoots[0] : scope,
+    additionalRoots: scope === allCustomLocations ? customRoots.slice(1) : undefined,
     type,
     includeHidden: settings.includeHidden,
     includeGlobs: settings.includeGlobs,
     excludeGlobs: settings.excludeGlobs,
     excludeRegex: settings.excludeRegex,
-  }), [root, type, settings]);
+  }), [scope, type, settings, customRoots]);
   const file = indexPath(environment.supportPath, options);
+
+  useEffect(() => {
+    let active = true;
+    void loadUsage().then((entries) => { if (active) setUsage(entries); }).catch(console.error);
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -157,9 +192,9 @@ function Search({ settings, customRoots }: { settings: Settings; customRoots: st
     const { signal } = controller;
     setSearching(true);
     void searchIndex(file, query, binary.path, settings.matchMode === "exact", signal)
-      .then((paths) => { if (!signal.aborted) setResult({ file, paths }); })
+      .then((paths) => { if (!signal.aborted) setResult({ file, query, paths }); })
       .catch((error: Error) => {
-        if (!signal.aborted) setResult({ file, paths: [], error: error.message });
+        if (!signal.aborted) setResult({ file, query, paths: [], error: error.message });
       })
       .finally(() => { if (!signal.aborted) setSearching(false); });
 
@@ -167,12 +202,32 @@ function Search({ settings, customRoots }: { settings: Settings; customRoots: st
   }, [file, revision, query, binary.path, settings.matchMode]);
 
   const current = result?.file === file ? result : undefined;
+  const rankedPaths = useMemo(
+    () => current ? rankMatches(current.paths, usage, current.query, Date.now()) : [],
+    [current, usage],
+  );
   const indexError = index?.file === file ? index.error : undefined;
   const error = binary.error ?? current?.error ?? indexError;
   const loading = !error && (searching || index?.file !== file || index.refreshing);
   const refreshAction = (
     <Action title="Refresh Search Index" icon={Icon.ArrowClockwise} onAction={() => setRefresh((value) => value + 1)} />
   );
+
+  async function openResult(path: string, resultQuery: string) {
+    try {
+      await open(path);
+    } catch (error) {
+      await showToast({ style: Toast.Style.Failure, title: "Couldn’t Open Path", message: (error as Error).message });
+      return;
+    }
+
+    try {
+      setUsage(await saveOpenedPath(path, resultQuery));
+    } catch (error) {
+      console.error("Could not save search usage", error);
+    }
+    await closeMainWindow();
+  }
 
   return (
     <List
@@ -184,20 +239,20 @@ function Search({ settings, customRoots }: { settings: Settings; customRoots: st
       searchBarAccessory={
         <List.Dropdown
           tooltip="Search Location and Result Type"
-          value={JSON.stringify([root, type])}
+          value={JSON.stringify([scope, type])}
           onChange={(value) => {
-            const [nextRoot, nextType] = JSON.parse(value) as [string, ResultType];
-            setRoot(nextRoot);
+            const [nextScope, nextType] = JSON.parse(value) as [string, ResultType];
+            setScope(nextScope);
             setType(nextType);
           }}
         >
           {roots.map((location) => (
-            <List.Dropdown.Section key={location.path} title={location.title}>
+            <List.Dropdown.Section key={location.id} title={location.title}>
               {resultTypes.map((kind) => (
                 <List.Dropdown.Item
                   key={kind}
                   title={`${location.title} · ${typeLabels[kind]}`}
-                  value={JSON.stringify([location.path, kind])}
+                  value={JSON.stringify([location.id, kind])}
                 />
               ))}
             </List.Dropdown.Section>
@@ -221,7 +276,7 @@ function Search({ settings, customRoots }: { settings: Settings; customRoots: st
         </List.Section>
       )}
       <List.Section title="Results">
-        {current?.paths.map((path) => (
+        {rankedPaths.map((path) => (
           <List.Item
             key={path}
             title={basename(path)}
@@ -230,7 +285,7 @@ function Search({ settings, customRoots }: { settings: Settings; customRoots: st
             quickLook={{ path }}
             actions={
               <ActionPanel>
-                <Action.Open title="Open" target={path} />
+                <Action title="Open" icon={Icon.Finder} onAction={() => openResult(path, current?.query ?? "")} />
                 <Action.ShowInFinder path={path} />
                 <Action.CopyToClipboard title="Copy Path" content={path} shortcut={{ modifiers: ["cmd"], key: "c" }} />
                 {refreshAction}

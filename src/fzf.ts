@@ -7,8 +7,7 @@ import { homedir } from "node:os";
 import { delimiter, isAbsolute, join } from "node:path";
 import { Readable } from "node:stream";
 import { expandHome } from "./candidates";
-
-const resultLimit = 60;
+import { rankingPoolLimit, visibleResultLimit } from "./usage";
 
 export async function findFzf(preference?: string) {
   const explicit = preference?.trim();
@@ -36,8 +35,8 @@ export async function findFzf(preference?: string) {
   throw new Error("fzf was not found. Install it or set FZF Executable in preferences.");
 }
 
-async function firstPaths(stream: Readable, atLimit?: () => void) {
-  const paths: string[] = [];
+async function firstPaths(stream: Readable, limit: number, atLimit?: () => void) {
+  const paths = new Set<string>();
   let remainder = "";
   stream.setEncoding("utf8");
 
@@ -45,14 +44,14 @@ async function firstPaths(stream: Readable, atLimit?: () => void) {
     const records = (remainder + chunk).split("\0");
     remainder = records.pop() ?? "";
     for (const path of records) {
-      paths.push(path);
-      if (paths.length === resultLimit) {
+      paths.add(path);
+      if (paths.size === limit) {
         atLimit?.();
-        return paths;
+        return [...paths];
       }
     }
   }
-  return paths;
+  return [...paths];
 }
 
 export async function searchIndex(
@@ -63,7 +62,7 @@ export async function searchIndex(
   signal: AbortSignal,
 ) {
   signal.throwIfAborted();
-  if (!query.trim()) return firstPaths(createReadStream(file, { signal }));
+  if (!query.trim()) return firstPaths(createReadStream(file, { signal }), visibleResultLimit);
 
   const input = await open(file, "r");
   try {
@@ -86,7 +85,7 @@ export async function searchIndex(
     const closed = once(child, "close");
     try {
       const [paths, [code]] = await Promise.all([
-        firstPaths(child.stdout, () => {
+        firstPaths(child.stdout, rankingPoolLimit, () => {
           capped = true;
           child.kill();
         }),
