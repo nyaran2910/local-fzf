@@ -1,0 +1,118 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "local-fzf",
+  "title": "Local FZF",
+  "description": "Search files and directories with fzf",
+  "icon": "extension-icon.png",
+  "author": "nyaran2910",
+  "categories": ["Productivity"],
+  "license": "MIT",
+  "platforms": ["macOS"],
+  "commands": [
+    {
+      "name": "index",
+      "title": "Local FZF",
+      "description": "Find and open files and directories with fzf",
+      "mode": "view"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "defaultScope",
+      "title": "Default Search Location",
+      "description": "Location selected when the command opens.",
+      "type": "dropdown",
+      "required": false,
+      "default": "home",
+      "data": [
+        { "title": "Home", "value": "home" },
+        { "title": "First Custom Location", "value": "custom" },
+        { "title": "Entire Disk", "value": "disk" }
+      ]
+    },
+    {
+      "name": "customRoots",
+      "title": "Custom Search Locations",
+      "description": "List of absolute paths separated by semicolons. For example, ~/Workspace; ~/Documents/Work Files",
+      "type": "textfield",
+      "required": false
+    },
+    {
+      "name": "defaultType",
+      "title": "Default Result Type",
+      "description": "Kinds of items shown when the command opens.",
+      "type": "dropdown",
+      "required": false,
+      "default": "both",
+      "data": [
+        { "title": "Files and Folders", "value": "both" },
+        { "title": "Files Only", "value": "files" },
+        { "title": "Folders Only", "value": "folders" }
+      ]
+    },
+    {
+      "name": "includeGlobs",
+      "title": "Include Globs",
+      "description": "Only show paths matching at least one of these semicolon-separated globs. Leave blank to show all candidates.",
+      "type": "textfield",
+      "required": false
+    },
+    {
+      "name": "excludeGlobs",
+      "title": "Exclude Globs",
+      "description": "Skip paths and folders matching these semicolon-separated globs. Supports names, paths relative to the selected location, and absolute paths.",
+      "type": "textfield",
+      "required": false,
+      "default": ".git; node_modules; .venv; .next; *.photoslibrary; ~/Library; /System; /Library; /private; /Volumes; /dev; /nix"
+    },
+    {
+      "name": "excludeRegex",
+      "title": "Exclude Regular Expression",
+      "description": "Optional JavaScript regular expression matched against paths relative to the selected location. Enter the pattern without surrounding slashes.",
+      "type": "textfield",
+      "required": false
+    },
+    {
+      "name": "includeHidden",
+      "title": "Hidden Files",
+      "label": "Include hidden files and folders",
+      "description": "Include paths with dot-prefixed names.",
+      "type": "checkbox",
+      "required": false,
+      "default": false
+    },
+    {
+      "name": "matchMode",
+      "title": "FZF Match Mode",
+      "description": "Default matching behavior for terms in the search bar.",
+      "type": "dropdown",
+      "required": false,
+      "default": "fuzzy",
+      "data": [
+        { "title": "Fuzzy", "value": "fuzzy" },
+        { "title": "Exact", "value": "exact" }
+      ]
+    },
+    {
+      "name": "fzfPath",
+      "title": "FZF Executable",
+      "description": "Optional absolute path to fzf. Leave blank to detect the Homebrew, Nix, or PATH installation.",
+      "type": "textfield",
+      "required": false
+    }
+  ],
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@raycast/api": "^2.13.1",
+    "minimatch": "^10.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/react": "19.3.0",
+    "typescript": "^5.7.2"
+  }
+}
