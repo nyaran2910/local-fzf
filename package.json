@@ -54,7 +54,7 @@
     {
       "name": "includeGlobs",
       "title": "Include Globs",
-      "description": "Only show paths matching at least one of these semicolon-separated globs. Leave blank to show all candidates.",
+      "description": "Add exceptions for hidden or excluded entries. Separate globs with semicolons. Use a trailing slash for folders, for example .t3/.",
       "type": "textfield",
       "required": false
     },

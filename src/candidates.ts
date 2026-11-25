@@ -36,23 +36,27 @@ export interface CandidateOptions {
 }
 
 export function indexPath(supportPath: string, options: CandidateOptions) {
-  const key = createHash("sha256").update(JSON.stringify(options)).digest("hex");
+  const hash = createHash("sha256").update(JSON.stringify(options));
+  if (options.includeGlobs?.trim()) hash.update("additive-includes");
+  const key = hash.digest("hex");
   return join(supportPath, "candidates-v1", key);
 }
 
-function compileGlobs(value?: string) {
-  return splitPatterns(value).map((pattern) => {
-    const expanded = expandHome(pattern).replace(/\/+$/, "");
-    const absolute = isAbsolute(expanded);
-    const matcher = new Minimatch(expanded, { dot: true, nonegate: true, nocomment: true });
-    return (fullPath: string, relativePath: string) =>
-      matcher.match(absolute ? fullPath : expanded.includes("/") ? relativePath : basename(relativePath));
-  });
+function compileGlob(pattern: string) {
+  const expanded = expandHome(pattern).replace(/\/+$/, "");
+  const absolute = isAbsolute(expanded);
+  const matcher = new Minimatch(expanded, { dot: true, nonegate: true, nocomment: true });
+  const relative = expanded.includes("/");
+  return (fullPath: string, relativePath: string) =>
+    matcher.match(absolute ? fullPath : relative ? relativePath : basename(relativePath));
 }
 
 export function candidateRules(options: CandidateOptions) {
-  const includes = compileGlobs(options.includeGlobs);
-  const excludes = compileGlobs(options.excludeGlobs);
+  const includes = splitPatterns(options.includeGlobs).map((pattern) => ({
+    folderOnly: pattern.endsWith("/"),
+    match: compileGlob(pattern),
+  }));
+  const excludes = splitPatterns(options.excludeGlobs).map(compileGlob);
   let regex: RegExp | undefined;
   try {
     regex = options.excludeRegex ? new RegExp(options.excludeRegex) : undefined;
@@ -60,8 +64,8 @@ export function candidateRules(options: CandidateOptions) {
     throw new Error(`Invalid Exclude Regular Expression: ${(error as Error).message}`);
   }
   return {
-    include: (path: string, relative: string) =>
-      includes.length === 0 || includes.some((match) => match(path, relative)),
+    include: (path: string, relative: string, directory: boolean) =>
+      includes.some(({ folderOnly, match }) => (!folderOnly || directory) && match(path, relative)),
     exclude: (path: string, relative: string) =>
       regex?.test(relative) || excludes.some((match) => match(path, relative)),
   };
@@ -112,15 +116,15 @@ export async function refreshIndex(file: string, options: CandidateOptions, sign
         for (const [index, entries] of contents.entries()) {
           const parent = batch[index];
           for (const entry of entries) {
-            if (!options.includeHidden && entry.name.startsWith(".")) continue;
             const directory = entry.isDirectory();
             if (!directory && !entry.isFile()) continue;
             const path = join(parent.path, entry.name);
             const relative = parent.relative ? `${parent.relative}/${entry.name}` : entry.name;
-            if (rules.exclude(path, relative)) continue;
+            const hidden = !options.includeHidden && entry.name.startsWith(".");
+            if ((hidden || rules.exclude(path, relative)) && !rules.include(path, relative, directory)) continue;
             if (directory) pending.push({ path, relative });
             const matchesType = directory ? options.type !== "files" : options.type !== "folders";
-            if (matchesType && rules.include(path, relative)) candidates.push(path);
+            if (matchesType) candidates.push(path);
           }
         }
 

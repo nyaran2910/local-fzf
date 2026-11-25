@@ -9,14 +9,16 @@ Raycast の **Settings → Extensions → Local FZF** で設定します。
 | Custom Search Locations | `~/Workspace; ~/Documents/Work Files`。各パスが検索メニューに追加されます |
 | Default Search Location | Home、最初のカスタム場所、すべてのカスタム場所、Entire Disk から選びます |
 | Default Result Type | ファイルとフォルダ、ファイルのみ、フォルダのみから選びます |
-| Include Globs | `*.ts; **/*.md`。一致した項目を検索候補に含めます |
+| Include Globs | `.t3/; .env.example`。隠し項目や除外された項目を例外として検索に追加します。末尾の `/` はフォルダを指定します |
 | Exclude Globs | `node_modules; **/build; ~/Library`。一致したフォルダの中も探索対象から外れます |
 | Exclude Regular Expression | `(^|/)(dist|coverage)(/|$)`。検索範囲からの相対パスに適用します |
 | Hidden Files | ドットで始まるファイルとフォルダを検索対象に含めます |
 | FZF Match Mode | ファジー検索と完全な部分文字列の一致を切り替えます |
 | FZF Executable | 必要に応じて `~/.nix-profile/bin/fzf` のような実行ファイルのパスを指定します |
 
-glob はセミコロンで区切ります。スラッシュを含まないパターンはファイル名・フォルダ名、相対パターンは検索範囲からのパス、絶対パターンは絶対パスに適用します。相対パスを扱う除外正規表現は JavaScript の構文で、前後の `/` を省きます。検索欄では `^/Users/`、`.md$`、`!draft` など、fzf のクエリ構文が使えます。検索対象のパスは絶対パスなので、`^` は絶対パスの先頭に一致します。
+glob はセミコロンで区切ります。パターンは名前（`.t3/`）、検索範囲からの相対パス（`project/.t3/`）、絶対パス（`~/Workspace/project/.t3/`）で指定できます。例外にしたフォルダ内では、通常の隠し項目と除外の設定が適用されます。除外正規表現は検索範囲からの相対パスに適用します。JavaScript の構文で、前後の `/` を省きます。検索欄では `^/Users/`、`.md$`、`!draft` など、fzf のクエリ構文が使えます。
+
+マシン固有の Include Globs は `~/.config/raycast/local-fzf.json` に `{"includeGlobs": ".t3/"}` のように保存できます。Raycast の設定欄に値があれば、そちらが優先されます。
 
 カスタム場所を複数登録すると、⌘P の **All Custom Locations** でまとめて検索できます。たとえば Workspace と Google Drive の作業フォルダを登録し、`コンパイラ` で検索して Workspace 側を開くと、次の同じ検索で Workspace 側が優先されます。開いた回数と最終利用時刻をパス・検索語ごとにローカル保存し、fzf が返した上位候補の中で順位を調整します。
 

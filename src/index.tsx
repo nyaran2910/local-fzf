@@ -2,9 +2,10 @@ import {
   Action, ActionPanel, closeMainWindow, environment, getPreferenceValues, Icon, List, LocalStorage, open,
   openExtensionPreferences, showToast, Toast,
 } from "@raycast/api";
+import { readFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CandidateOptions, candidateRules, indexPath, readCustomRoots, refreshIndex, ResultType, resultTypes } from "./candidates";
 import { findFzf, searchIndex } from "./fzf";
@@ -81,8 +82,21 @@ function PreferencesAction() {
   return <Action title="Open Extension Settings" icon={Icon.Gear} onAction={openExtensionPreferences} />;
 }
 
+function readSettings(): Settings {
+  const settings = getPreferenceValues<Settings>();
+  if (settings.includeGlobs !== undefined) return settings;
+
+  try {
+    const defaults = JSON.parse(readFileSync(join(homedir(), ".config/raycast/local-fzf.json"), "utf8"));
+    if (typeof defaults?.includeGlobs === "string") return { ...settings, includeGlobs: defaults.includeGlobs };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.error("Could not read Local FZF settings", error);
+  }
+  return settings;
+}
+
 export default function Command() {
-  const [settings] = useState(() => getPreferenceValues<Settings>());
+  const [settings] = useState(readSettings);
   let custom: string[];
   try {
     custom = readCustomRoots(settings.customRoots);
